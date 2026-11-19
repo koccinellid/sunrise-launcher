@@ -13,7 +13,8 @@
 //! game's porter keeps: a modpack import runs it with this proxy in `HTTPS_PROXY`/`HTTP_PROXY`, so
 //! both leave the same hosts alone. This module adds what is the launcher's own — the setting in
 //! `settings.json`, kept in memory so a request doesn't read the file — and hands the address to
-//! the parts that build their agents.
+//! the parts that build their agents, and to the game it starts, whose connections to servers go
+//! through the same proxy as its own downloads.
 use crate::backend::Settings;
 use std::sync::Mutex;
 
@@ -31,11 +32,20 @@ pub fn spec_for(url: &str) -> Option<String> {
     setting().or_else(|| crate::net::env_for(scheme))
 }
 
-/// Puts the launcher's network settings in `command`'s environment, as the programs it starts (the porter, the native build tool) read them: its proxy setting in `HTTPS_PROXY`/`HTTP_PROXY` (the environment's own, and `NO_PROXY`, pass through), and the GitHub mirror.
-pub fn child_env(command: &mut std::process::Command) {
+/// Puts the launcher's proxy setting in `command`'s environment, in the variables a program it
+/// starts reads for its own connections: `HTTPS_PROXY` and `HTTP_PROXY` (the environment's own,
+/// and `NO_PROXY`, pass through). The game gets it this way too, so the setting covers the
+/// launcher and what it launches alike.
+pub fn proxy_env(command: &mut std::process::Command) {
     if let Some(spec) = setting() {
         command.env("HTTPS_PROXY", &spec).env("HTTP_PROXY", spec);
     }
+}
+
+/// Puts the launcher's network settings in `command`'s environment, as the programs it starts (the
+/// porter, the native build tool) read them: its proxy (`proxy_env`), and the GitHub mirror.
+pub fn child_env(command: &mut std::process::Command) {
+    proxy_env(command);
     if let Some(mirror) = crate::github::mirror_named() {
         command.env("SUNRISE_GITHUB_MIRROR", mirror);
     }

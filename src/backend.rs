@@ -2653,6 +2653,8 @@ pub fn client_command(tag: &str) -> Command {
     }
     crate::run_leases::mark(&mut cmd, &version_dir(tag));
     strip_launcher_render_env(&mut cmd);
+    // The proxy in the launcher's settings is the one the game connects through, if it has one.
+    crate::proxy::proxy_env(&mut cmd);
     crate::telemetry::ping_only_if_allowed(&mut cmd, !Settings::load().ping_off);
     cmd.current_dir(&home)
         .env("SUNRISE_HOME", &home)
@@ -2692,6 +2694,8 @@ pub fn server_command(tag: &str, folder: &Path) -> Command {
         cmd.env("SUNRISE_TELEMETRY_URL", "off");
     }
     crate::run_leases::mark(&mut cmd, &version_dir(tag));
+    // The server the player hosts reaches sign-in and skins through the same proxy as the game.
+    crate::proxy::proxy_env(&mut cmd);
     cmd.current_dir(folder)
         .arg("--resources")
         .arg(resources(tag))
@@ -5286,6 +5290,32 @@ pub fn {f}("
             v.to_string_lossy()
                 .contains("application.name = \"Sunrise\"")
         }));
+    }
+
+    /// #92: a player who needs a proxy sets it once, in the launcher, and the game connects
+    /// through the same one; with no setting the game keeps whatever the environment gives it.
+    #[test]
+    fn the_game_hears_the_proxy_the_launcher_is_set_to_use() {
+        let seen = |cmd: &std::process::Command, key: &str| {
+            cmd.get_envs()
+                .find(|(name, _)| *name == key)
+                .and_then(|(_, value)| value)
+                .map(|value| value.to_string_lossy().into_owned())
+        };
+        crate::proxy::announce(Some("socks5://127.0.0.1:7891".into()));
+        let cmd = client_command("v2026.10.13");
+        crate::proxy::announce(None);
+        assert_eq!(
+            seen(&cmd, "HTTPS_PROXY").as_deref(),
+            Some("socks5://127.0.0.1:7891")
+        );
+        assert_eq!(
+            seen(&cmd, "HTTP_PROXY").as_deref(),
+            Some("socks5://127.0.0.1:7891")
+        );
+        let cmd = client_command("v2026.10.13");
+        assert_eq!(seen(&cmd, "HTTPS_PROXY"), None);
+        assert_eq!(seen(&cmd, "HTTP_PROXY"), None);
     }
 
     #[test]
